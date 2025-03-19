@@ -130,3 +130,16 @@ robot_agent = pirate_agent.clone(
     instructions="Write like a robot",
 )
 ```
+
+## Forcing tool use
+
+Supplying a list of tools doesn't always mean the LLM will use a tool. You can force tool use by setting [`ModelSettings.tool_choice`][agents.model_settings.ModelSettings.tool_choice]. Valid values are:
+
+1. `auto`, which allows the LLM to decide whether or not to use a tool.
+2. `required`, which requires the LLM to use a tool (but it can intelligently decide which tool).
+3. `none`, which requires the LLM to _not_ use a tool.
+4. Setting a specific string e.g. `my_tool`, which requires the LLM to use that specific tool.
+
+!!! note
+
+    If requiring tool use, you should consider setting [`Agent.tool_use_behavior`] to stop the Agent from running when a tool output is produced. Otherwise, the Agent might run in an infinite loop, where the LLM produces a tool call , and the tool result is sent to the LLM, and this infinite loops because the LLM is always forced to use a tool.

@@ -4,7 +4,9 @@ import dataclasses
 import inspect
 from collections.abc import Awaitable
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Callable, Generic, cast
+from typing import TYPE_CHECKING, Any, Callable, Generic, Literal, cast
+
+from typing_extensions import TypeAlias, TypedDict
 
 from .guardrail import InputGuardrail, OutputGuardrail
 from .handoffs import Handoff
@@ -13,13 +15,40 @@ from .logger import logger
 from .model_settings import ModelSettings
 from .models.interface import Model
 from .run_context import RunContextWrapper, TContext
-from .tool import Tool, function_tool
+from .tool import FunctionToolResult, Tool, function_tool
 from .util import _transforms
 from .util._types import MaybeAwaitable
 
 if TYPE_CHECKING:
     from .lifecycle import AgentHooks
     from .result import RunResult
+
+
+@dataclass
+class ToolsToFinalOutputResult:
+    is_final_output: bool
+    """Whether this is the final output. If False, the LLM will run again and receive the tool call
+    output.
+    """
+
+    final_output: Any | None = None
+    """The final output. Can be None if `is_final_output` is False, otherwise must match the
+    `output_type` of the agent.
+    """
+
+
+ToolsToFinalOutputFunction: TypeAlias = Callable[
+    [RunContextWrapper[TContext], list[FunctionToolResult]],
+    MaybeAwaitable[ToolsToFinalOutputResult],
+]
+"""A function that takes a run context and a list of tool results, and returns a
+`ToolToFinalOutputResult`.
+"""
+
+
+class StopAtTools(TypedDict):
+    stop_at_tool_names: list[str]
+    """A list of tool names, any of which will stop the agent from running further."""
 
 
 @dataclass
@@ -93,6 +122,25 @@ class Agent(Generic[TContext]):
 
     hooks: AgentHooks[TContext] | None = None
     """A class that receives callbacks on various lifecycle events for this agent.
+    """
+
+    tool_use_behavior: (
+        Literal["run_llm_again", "stop_on_first_tool"] | StopAtTools | ToolsToFinalOutputFunction
+    ) = "run_llm_again"
+    """This lets you configure how tool use is handled.
+    - "run_llm_again": The default behavior. Tools are run, and then the LLM receives the results
+        and gets to respond.
+    - "stop_on_first_tool": The output of the first tool call is used as the final output. This
+        means that the LLM does not process the result of the tool call.
+    - A list of tool names: The agent will stop running if any of the tools in the list are called.
+        The final output will be the output of the first matching tool call. The LLM does not
+        process the result of the tool call.
+    - A function: If you pass a function, it will be called with the run context and the list of
+      tool results. It must return a `ToolToFinalOutputResult`, which determines whether the tool
+      calls result in a final output.
+
+      NOTE: This configuration is specific to FunctionTools. Hosted tools, such as file search,
+      web search, etc are always processed by the LLM.
     """
 
     def clone(self, **kwargs: Any) -> Agent[TContext]:

@@ -21,6 +21,7 @@ theme:
 nav:
     - Intro: index.md
     - Quickstart: quickstart.md
+    - Examples: examples.md
     - Documentation:
           - agents.md
           - running_agents.md

@@ -51,7 +51,7 @@ class AgentSpanData(SpanData):
 class FunctionSpanData(SpanData):
     __slots__ = ("name", "input", "output")
 
-    def __init__(self, name: str, input: str | None, output: str | None):
+    def __init__(self, name: str, input: str | None, output: Any | None):
         self.name = name
         self.input = input
         self.output = output
@@ -65,7 +65,7 @@ class FunctionSpanData(SpanData):
             "type": self.type,
             "name": self.name,
             "input": self.input,
-            "output": self.output,
+            "output": str(self.output) if self.output else None,
         }
 
 

@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
+from collections.abc import Awaitable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from openai.types.responses import (
     ResponseComputerToolCall,
@@ -25,7 +27,7 @@ from openai.types.responses.response_computer_tool_call import (
 from openai.types.responses.response_input_param import ComputerCallOutput
 from openai.types.responses.response_reasoning_item import ResponseReasoningItem
 
-from .agent import Agent
+from .agent import Agent, ToolsToFinalOutputResult
 from .agent_output import AgentOutputSchema
 from .computer import AsyncComputer, Computer
 from .exceptions import AgentsException, ModelBehaviorError, UserError
@@ -48,7 +50,7 @@ from .logger import logger
 from .models.interface import ModelTracing
 from .run_context import RunContextWrapper, TContext
 from .stream_events import RunItemStreamEvent, StreamEvent
-from .tool import ComputerTool, FunctionTool
+from .tool import ComputerTool, FunctionTool, FunctionToolResult
 from .tracing import (
     SpanError,
     Trace,
@@ -69,6 +71,8 @@ class QueueCompleteSentinel:
 
 
 QUEUE_COMPLETE_SENTINEL = QueueCompleteSentinel()
+
+_NOT_FINAL_OUTPUT = ToolsToFinalOutputResult(is_final_output=False, final_output=None)
 
 
 @dataclass
@@ -199,7 +203,7 @@ class RunImpl:
                 config=run_config,
             ),
         )
-        new_step_items.extend(function_results)
+        new_step_items.extend([result.run_item for result in function_results])
         new_step_items.extend(computer_results)
 
         # Second, check if there are any handoffs
@@ -214,6 +218,36 @@ class RunImpl:
                 hooks=hooks,
                 context_wrapper=context_wrapper,
                 run_config=run_config,
+            )
+
+        # Third, we'll check if the tool use should result in a final output
+        check_tool_use = await cls._check_for_final_output_from_tools(
+            agent=agent,
+            tool_results=function_results,
+            context_wrapper=context_wrapper,
+            config=run_config,
+        )
+
+        if check_tool_use.is_final_output:
+            # If the output type is str, then let's just stringify it
+            if not agent.output_type or agent.output_type is str:
+                check_tool_use.final_output = str(check_tool_use.final_output)
+
+            if check_tool_use.final_output is None:
+                logger.error(
+                    "Model returned a final output of None. Not raising an error because we assume"
+                    "you know what you're doing."
+                )
+
+            return await cls.execute_final_output(
+                agent=agent,
+                original_input=original_input,
+                new_response=new_response,
+                pre_step_items=pre_step_items,
+                new_step_items=new_step_items,
+                final_output=check_tool_use.final_output,
+                hooks=hooks,
+                context_wrapper=context_wrapper,
             )
 
         # Now we can check if the model also produced a final output
@@ -355,10 +389,10 @@ class RunImpl:
         hooks: RunHooks[TContext],
         context_wrapper: RunContextWrapper[TContext],
         config: RunConfig,
-    ) -> list[RunItem]:
+    ) -> list[FunctionToolResult]:
         async def run_single_tool(
             func_tool: FunctionTool, tool_call: ResponseFunctionToolCall
-        ) -> str:
+        ) -> Any:
             with function_span(func_tool.name) as span_fn:
                 if config.trace_include_sensitive_data:
                     span_fn.span_data.input = tool_call.arguments
@@ -404,10 +438,14 @@ class RunImpl:
         results = await asyncio.gather(*tasks)
 
         return [
-            ToolCallOutputItem(
-                output=str(result),
-                raw_item=ItemHelpers.tool_call_output_item(tool_run.tool_call, str(result)),
-                agent=agent,
+            FunctionToolResult(
+                tool=tool_run.function_tool,
+                output=result,
+                run_item=ToolCallOutputItem(
+                    output=result,
+                    raw_item=ItemHelpers.tool_call_output_item(tool_run.tool_call, str(result)),
+                    agent=agent,
+                ),
             )
             for tool_run, result in zip(tool_runs, results)
         ]
@@ -645,6 +683,47 @@ class RunImpl:
 
             if event:
                 queue.put_nowait(event)
+
+    @classmethod
+    async def _check_for_final_output_from_tools(
+        cls,
+        *,
+        agent: Agent[TContext],
+        tool_results: list[FunctionToolResult],
+        context_wrapper: RunContextWrapper[TContext],
+        config: RunConfig,
+    ) -> ToolsToFinalOutputResult:
+        """Returns (i, final_output)."""
+        if not tool_results:
+            return _NOT_FINAL_OUTPUT
+
+        if agent.tool_use_behavior == "run_llm_again":
+            return _NOT_FINAL_OUTPUT
+        elif agent.tool_use_behavior == "stop_on_first_tool":
+            return ToolsToFinalOutputResult(
+                is_final_output=True, final_output=tool_results[0].output
+            )
+        elif isinstance(agent.tool_use_behavior, dict):
+            names = agent.tool_use_behavior.get("stop_at_tool_names", [])
+            for tool_result in tool_results:
+                if tool_result.tool.name in names:
+                    return ToolsToFinalOutputResult(
+                        is_final_output=True, final_output=tool_result.output
+                    )
+            return ToolsToFinalOutputResult(is_final_output=False, final_output=None)
+        elif callable(agent.tool_use_behavior):
+            if inspect.iscoroutinefunction(agent.tool_use_behavior):
+                return await cast(
+                    Awaitable[ToolsToFinalOutputResult],
+                    agent.tool_use_behavior(context_wrapper, tool_results),
+                )
+            else:
+                return cast(
+                    ToolsToFinalOutputResult, agent.tool_use_behavior(context_wrapper, tool_results)
+                )
+
+        logger.error(f"Invalid tool_use_behavior: {agent.tool_use_behavior}")
+        raise UserError(f"Invalid tool_use_behavior: {agent.tool_use_behavior}")
 
 
 class TraceCtxManager:

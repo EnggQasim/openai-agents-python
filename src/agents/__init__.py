@@ -5,7 +5,7 @@ from typing import Literal
 from openai import AsyncOpenAI
 
 from . import _config
-from .agent import Agent
+from .agent import Agent, ToolsToFinalOutputFunction, ToolsToFinalOutputResult
 from .agent_output import AgentOutputSchema
 from .computer import AsyncComputer, Button, Computer, Environment
 from .exceptions import (
@@ -57,6 +57,7 @@ from .tool import (
     ComputerTool,
     FileSearchTool,
     FunctionTool,
+    FunctionToolResult,
     Tool,
     WebSearchTool,
     default_tool_error_function,
@@ -137,6 +138,8 @@ def enable_verbose_stdout_logging():
 
 __all__ = [
     "Agent",
+    "ToolsToFinalOutputFunction",
+    "ToolsToFinalOutputResult",
     "Runner",
     "Model",
     "ModelProvider",
@@ -190,6 +193,7 @@ __all__ = [
     "AgentUpdatedStreamEvent",
     "StreamEvent",
     "FunctionTool",
+    "FunctionToolResult",
     "ComputerTool",
     "FileSearchTool",
     "Tool",

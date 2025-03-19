@@ -54,7 +54,7 @@ from openai.types.responses import (
     ResponseUsage,
 )
 from openai.types.responses.response_input_param import FunctionCallOutput, ItemReference, Message
-from openai.types.responses.response_usage import OutputTokensDetails
+from openai.types.responses.response_usage import InputTokensDetails, OutputTokensDetails
 
 from .. import _debug
 from ..agent_output import AgentOutputSchema
@@ -418,6 +418,11 @@ class OpenAIChatCompletionsModel(Model):
                         reasoning_tokens=usage.completion_tokens_details.reasoning_tokens
                         if usage.completion_tokens_details
                         and usage.completion_tokens_details.reasoning_tokens
+                        else 0
+                    ),
+                    input_tokens_details=InputTokensDetails(
+                        cached_tokens=usage.prompt_tokens_details.cached_tokens
+                        if usage.prompt_tokens_details and usage.prompt_tokens_details.cached_tokens
                         else 0
                     ),
                 )

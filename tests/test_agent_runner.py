@@ -21,6 +21,8 @@ from agents import (
     UserError,
     handoff,
 )
+from agents.agent import ToolsToFinalOutputResult
+from agents.tool import FunctionToolResult, function_tool
 
 from .fake_model import FakeModel
 from .test_responses import (
@@ -552,3 +554,83 @@ async def test_output_guardrail_tripwire_triggered_causes_exception():
 
     with pytest.raises(OutputGuardrailTripwireTriggered):
         await Runner.run(agent, input="user_message")
+
+
+@function_tool
+def test_tool_one():
+    return Foo(bar="tool_one_result")
+
+
+@function_tool
+def test_tool_two():
+    return "tool_two_result"
+
+
+@pytest.mark.asyncio
+async def test_tool_use_behavior_first_output():
+    model = FakeModel()
+    agent = Agent(
+        name="test",
+        model=model,
+        tools=[get_function_tool("foo", "tool_result"), test_tool_one, test_tool_two],
+        tool_use_behavior="stop_on_first_tool",
+        output_type=Foo,
+    )
+
+    model.add_multiple_turn_outputs(
+        [
+            # First turn: a message and tool call
+            [
+                get_text_message("a_message"),
+                get_function_tool_call("test_tool_one", None),
+                get_function_tool_call("test_tool_two", None),
+            ],
+        ]
+    )
+
+    result = await Runner.run(agent, input="user_message")
+
+    assert result.final_output == Foo(bar="tool_one_result"), (
+        "should have used the first tool result"
+    )
+
+
+def custom_tool_use_behavior(
+    context: RunContextWrapper[Any], results: list[FunctionToolResult]
+) -> ToolsToFinalOutputResult:
+    if "test_tool_one" in [result.tool.name for result in results]:
+        return ToolsToFinalOutputResult(is_final_output=True, final_output="the_final_output")
+    else:
+        return ToolsToFinalOutputResult(is_final_output=False, final_output=None)
+
+
+@pytest.mark.asyncio
+async def test_tool_use_behavior_custom_function():
+    model = FakeModel()
+    agent = Agent(
+        name="test",
+        model=model,
+        tools=[get_function_tool("foo", "tool_result"), test_tool_one, test_tool_two],
+        tool_use_behavior=custom_tool_use_behavior,
+    )
+
+    model.add_multiple_turn_outputs(
+        [
+            # First turn: a message and tool call
+            [
+                get_text_message("a_message"),
+                get_function_tool_call("test_tool_two", None),
+            ],
+            # Second turn: a message and tool call
+            [
+                get_text_message("a_message"),
+                get_function_tool_call("test_tool_one", None),
+                get_function_tool_call("test_tool_two", None),
+            ],
+        ]
+    )
+
+    result = await Runner.run(agent, input="user_message")
+
+    assert len(result.raw_responses) == 2, "should have two model responses"
+    assert result.final_output == "the_final_output", "should have used the custom function"
