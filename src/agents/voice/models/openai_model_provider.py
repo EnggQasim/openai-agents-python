@@ -3,13 +3,10 @@ from __future__ import annotations
 import httpx
 from openai import AsyncOpenAI, DefaultAsyncHttpxClient
 
-from . import _openai_shared
-from .interface import Model, ModelProvider
-from .openai_chatcompletions import OpenAIChatCompletionsModel
-from .openai_responses import OpenAIResponsesModel
-
-DEFAULT_MODEL: str = "gpt-4o"
-
+from ...models import _openai_shared
+from ..model import STTModel, TTSModel, VoiceModelProvider
+from .openai_stt import OpenAISTTModel
+from .openai_tts import OpenAITTSModel
 
 _http_client: httpx.AsyncClient | None = None
 
@@ -23,7 +20,13 @@ def shared_http_client() -> httpx.AsyncClient:
     return _http_client
 
 
-class OpenAIProvider(ModelProvider):
+DEFAULT_STT_MODEL = "gpt-4o-transcribe"
+DEFAULT_TTS_MODEL = "gpt-4o-mini-tts"
+
+
+class OpenAIVoiceModelProvider(VoiceModelProvider):
+    """A voice model provider that uses OpenAI models."""
+
     def __init__(
         self,
         *,
@@ -32,9 +35,8 @@ class OpenAIProvider(ModelProvider):
         openai_client: AsyncOpenAI | None = None,
         organization: str | None = None,
         project: str | None = None,
-        use_responses: bool | None = None,
     ) -> None:
-        """Create a new OpenAI provider.
+        """Create a new OpenAI voice model provider.
 
         Args:
             api_key: The API key to use for the OpenAI client. If not provided, we will use the
@@ -45,7 +47,6 @@ class OpenAIProvider(ModelProvider):
                 OpenAI client using the api_key and base_url.
             organization: The organization to use for the OpenAI client.
             project: The project to use for the OpenAI client.
-            use_responses: Whether to use the OpenAI responses API.
         """
         if openai_client is not None:
             assert api_key is None and base_url is None, (
@@ -58,11 +59,6 @@ class OpenAIProvider(ModelProvider):
             self._stored_base_url = base_url
             self._stored_organization = organization
             self._stored_project = project
-
-        if use_responses is not None:
-            self._use_responses = use_responses
-        else:
-            self._use_responses = _openai_shared.get_use_responses_by_default()
 
     # We lazy load the client in case you never actually use OpenAIProvider(). Otherwise
     # AsyncOpenAI() raises an error if you don't have an API key set.
@@ -78,14 +74,24 @@ class OpenAIProvider(ModelProvider):
 
         return self._client
 
-    def get_model(self, model_name: str | None) -> Model:
-        if model_name is None:
-            model_name = DEFAULT_MODEL
+    def get_stt_model(self, model_name: str | None) -> STTModel:
+        """Get a speech-to-text model by name.
 
-        client = self._get_client()
+        Args:
+            model_name: The name of the model to get.
 
-        return (
-            OpenAIResponsesModel(model=model_name, openai_client=client)
-            if self._use_responses
-            else OpenAIChatCompletionsModel(model=model_name, openai_client=client)
-        )
+        Returns:
+            The speech-to-text model.
+        """
+        return OpenAISTTModel(model_name or DEFAULT_STT_MODEL, self._get_client())
+
+    def get_tts_model(self, model_name: str | None) -> TTSModel:
+        """Get a text-to-speech model by name.
+
+        Args:
+            model_name: The name of the model to get.
+
+        Returns:
+            The text-to-speech model.
+        """
+        return OpenAITTSModel(model_name or DEFAULT_TTS_MODEL, self._get_client())

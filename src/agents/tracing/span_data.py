@@ -186,3 +186,99 @@ class GuardrailSpanData(SpanData):
             "name": self.name,
             "triggered": self.triggered,
         }
+
+
+class TranscriptionSpanData(SpanData):
+    __slots__ = (
+        "input",
+        "output",
+        "model",
+        "model_config",
+    )
+
+    def __init__(
+        self,
+        input: str | None = None,
+        input_format: str | None = "pcm",
+        output: str | None = None,
+        model: str | None = None,
+        model_config: Mapping[str, Any] | None = None,
+    ):
+        self.input = input
+        self.input_format = input_format
+        self.output = output
+        self.model = model
+        self.model_config = model_config
+
+    @property
+    def type(self) -> str:
+        return "transcription"
+
+    def export(self) -> dict[str, Any]:
+        return {
+            "type": self.type,
+            "input": {
+                "data": self.input or "",
+                "format": self.input_format,
+            },
+            "output": self.output,
+            "model": self.model,
+            "model_config": self.model_config,
+        }
+
+
+class SpeechSpanData(SpanData):
+    __slots__ = ("input", "output", "model", "model_config", "first_byte_at")
+
+    def __init__(
+        self,
+        input: str | None = None,
+        output: str | None = None,
+        output_format: str | None = "pcm",
+        model: str | None = None,
+        model_config: Mapping[str, Any] | None = None,
+        first_content_at: str | None = None,
+    ):
+        self.input = input
+        self.output = output
+        self.output_format = output_format
+        self.model = model
+        self.model_config = model_config
+        self.first_content_at = first_content_at
+
+    @property
+    def type(self) -> str:
+        return "speech"
+
+    def export(self) -> dict[str, Any]:
+        return {
+            "type": self.type,
+            "input": self.input,
+            "output": {
+                "data": self.output or "",
+                "format": self.output_format,
+            },
+            "model": self.model,
+            "model_config": self.model_config,
+            "first_content_at": self.first_content_at,
+        }
+
+
+class SpeechGroupSpanData(SpanData):
+    __slots__ = "input"
+
+    def __init__(
+        self,
+        input: str | None = None,
+    ):
+        self.input = input
+
+    @property
+    def type(self) -> str:
+        return "speech-group"
+
+    def export(self) -> dict[str, Any]:
+        return {
+            "type": self.type,
+            "input": self.input,
+        }
